@@ -1,0 +1,224 @@
+---
+title: "Untitled"
+output: html_document
+---
+chapter1
+
+0번
+```{r warning=FALSE} 
+setwd('C:/Users/samsung/Desktop/대학교/4학년 2학기/피셋/패키지/2주차')
+
+library(tidyverse)
+library(data.table)
+library(VIM)
+data <- fread('data.csv', data.table =FALSE, encoding = 'UTF-8')
+```
+1번
+```{r warning=FALSE} 
+
+data <- data[,-which(substr(colnames(data),nchar(colnames(data)), nchar(colnames(data))) == "2")]
+
+```
+2번
+```{r warning=FALSE} 
+VIM::aggr(data,prop=FALSE,numbers=TRUE,col = c("lightyellow","pink"))
+
+```
+3-1번
+```{r warning=FALSE} 
+NA2mean <- function(x) replace(x, is.na(x), mean(x, na.rm = TRUE))
+data[,unlist(lapply(data, is.numeric))]   <- as.data.frame(lapply(select_if(data,is.numeric), NA2mean))
+
+colSums(is.na(data))
+```
+3-2번
+```{r warning=FALSE} 
+data$ownerChange <- replace(data$ownerChange, is.na(data$ownerChange), "same")
+as.factor(data$ownerChange) %>% summary()
+
+```
+
+4번
+```{r warning=FALSE} 
+data$OC <- ifelse(data$OC == "open",1,0)
+```
+5번
+```{r warning=FALSE} 
+data[,c(2:22)] <- lapply(data[,c(2:22)], as.numeric)
+```
+
+최종확인
+```{r warning=FALSE} 
+data %>% str()
+```
+
+```{r warning=FALSE} 
+data %>% summary()
+```
+
+chapter2
+
+문제1
+```{r warning=FALSE} 
+set.seed(1234)
+
+index <- caret::createDataPartition(
+  as.factor(data$OC),    
+  times=1,    
+  p=0.3,      
+  list=FALSE,
+)
+
+train <-data[-index,] #210
+val <- data[index,] #91
+```
+
+
+문제2
+```{r warning=FALSE} 
+library(MLmetrics)
+
+logit <- glm(OC~., family = "binomial", data= train)
+pred <- ifelse(predict(logit, val) > 0.5,1,0)
+Accuracy(pred,val$OC) #0.8351648
+```
+
+문제3
+```{r warning=FALSE} 
+logit_var <- step(logit,direction= "both")
+pred <- ifelse(predict(logit_var, val) > 0.5,1,0)
+Accuracy(pred,val$OC) #0.8571429
+```
+문제4
+```{r warning=FALSE} 
+cv_param <- expand.grid(mtry = c(3,4,5))
+acc <- rep(NA,3)
+acc_rf <- cbind(cv_param,acc)
+```
+
+
+문제5
+```{r warning=FALSE} 
+library(caret)
+set.seed(1234)
+n_split <-5
+cv <- createFolds(as.factor(data$OC),k=n_split)
+
+for (j in 1:3) {
+  acc_result <- c()
+  for( i in 1:n_split){
+    idx <- cv[[i]]
+    train_x<- data[-idx,]
+    val_x <- data[idx,]
+    
+    set.seed(1234) 
+    rf <- randomForest::randomForest(as.factor(OC)~., train_x[,c("OC",names(logit_var$coefficients)[2:16])], 
+                                     ntree =10, mtry = cv_param$mtry[j], importance = T)
+    
+    acc_temp <- Accuracy(val_x$OC, predict(rf,val_x))
+    acc_result <- c(acc_temp, acc_result)
+  }
+  acc_rf$acc[j] <- mean(acc_result)
+}
+
+acc_rf
+```
+문제6
+```{r warning=FALSE} 
+acc_rf[which.max(acc_rf$acc),] #0.9401639
+```
+
+문제7
+```{r warning=FALSE} 
+rf_train<- randomForest::randomForest(as.factor(OC)~., train_x[,c("OC",names(logit_var$coefficients)[2:16])], 
+                                      ntree = 10, mtry = cv_param$mtry[2], importance = T)
+
+###importance plot
+imp <- randomForest::varImpPlot(rf_train) %>% as.data.frame() 
+imp$varnames <- rownames(imp) # row names to column
+rownames(imp) <- NULL  
+
+ggplot(imp, aes(x=reorder(varnames, MeanDecreaseGini), y=MeanDecreaseGini)) + 
+  geom_point(color= "pink") +
+  geom_segment(aes(x=varnames,xend=varnames,y=0,yend=MeanDecreaseGini),color= "pink", size = 1) +
+  ylab("MeanDecreaseGini") +
+  xlab("Variable Name") +
+  coord_flip() + theme_classic()
+
+```
+
+chapter3
+
+문제1
+```{r warning=FALSE} 
+
+library(MASS)
+###문제1
+rf_data <- Boston
+
+set.seed(1234)
+
+index <- caret::createDataPartition(
+  rf_data$medv,    
+  times=1,    
+  p=0.2,      
+  list=FALSE,
+)
+
+data <-rf_data[-index,] #12,
+test <- rf_data[index,]
+
+```
+문제2
+```{r warning=FALSE} 
+cv_param <- expand.grid(mtry = c(3,4,5),
+                        ntree = c(10,100,200))
+RMSE <- rep(NA,9)
+RMSE_rf <- cbind(cv_param,RMSE)
+
+```
+
+문제3
+```{r warning=FALSE} 
+set.seed(1234)
+n_split <- 5
+cv <- createFolds(data$medv,k=n_split)
+
+pb <- progress::progress_bar$new(total = 9)
+
+for (j in 1:9) {
+  pb$tick()
+  RMSE_result <- c()
+  for(i in 1:n_split){
+    idx <- cv[[i]]
+    train_x<- data[-idx,]
+    val_x <- data[idx,]
+    
+    set.seed(1234) 
+    rf <- randomForest::randomForest(medv~., train_x, 
+                                     ntree = cv_param$ntree[j], mtry = cv_param$mtry[j],
+                                     importance = T)
+    prediction <- predict(rf, newdata=val_x) 
+    RMSE_temp <- RMSE(prediction,val_x$medv)
+    RMSE_result <- c(RMSE_temp, RMSE_result)
+    result <- mean(RMSE_result)
+  }
+  
+  RMSE_rf$RMSE[j] <- mean(result)
+}
+```
+문제4
+```{r warning=FALSE} 
+RMSE_rf[which.min(RMSE_rf$RMSE),]
+```
+
+문제5
+```{r warning=FALSE} 
+
+rf_train <- randomForest::randomForest(medv~., data, 
+                                 ntree = cv_param$ntree[5], mtry = cv_param$mtry[5],
+                                 importance = T)
+prediction <- predict(rf_train, newdata=test) 
+RMSE(prediction,test$medv) #4.201688
+```
+
